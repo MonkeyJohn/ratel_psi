@@ -6,7 +6,7 @@ from renderer import _Renderer
 
 
 def simulation():
-    stream = open('/home/xingjiansheng/Documents/src/workplace_xjs/drift/my_drift/car.yaml','r')
+    stream = open('/home/xingjiansheng/Documents/src/workplace_xjs/drift/ratel_psi/src/car.yaml','r')
     params = yaml.load(stream)
     model = BrushTireModel(params, 1.37, 1.96)
     renderer = _Renderer(params)
