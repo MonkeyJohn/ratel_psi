@@ -27,7 +27,7 @@ class _Renderer(object):
         self._ax = self._fig.add_subplot(111)
         self._ax.set_aspect('equal')
         self._ax.set_xlim(-50, 50)
-        self._ax.set_ylim(-30, 30)
+        self._ax.set_ylim(-50, 50)
 
         # Draw remaining simulation
         self._trajectory, = self._ax.plot(self._x, self._y, 'b-')
