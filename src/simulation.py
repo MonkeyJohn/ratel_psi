@@ -36,7 +36,7 @@ def InverseFiala(FyF, params):
     for i in range(60):
         alphatmp = -30* math.pi/180 + i * math.pi/180
         alphaF_LUT.append(alphatmp)
-        FyFtmp = FialaFront(params['C_alpha'], params['mu'], params['load_f'], 0 , alphatmp )
+        FyFtmp = FialaFront(params['C_alphaF'], params['mu'], params['load_f'], 0 , alphatmp )
         FyF_LUT.append(FyFtmp)
     c = np.abs(FyF - np.array(FyF_LUT))
     index = np.argmin(c)
@@ -47,7 +47,7 @@ def FyF2delta(beta, r, Ux, FyF, params):
     a = params['L_f']
     alphaF = InverseFiala(FyF,params )
     delta = -alphaF + math.atan(beta + a/Ux*r) #todo
-    return delta
+    return wraptopi(delta)
 
 def wraptopi(val):
     """
@@ -58,21 +58,21 @@ def wraptopi(val):
     return val
 
 def state_transition(state, control, dt, params):
-    t = np.array([0, dt])
+    t = np.array([0,dt/2,dt])
     X_new = solve_ivp(
         fun=(lambda t, state: Dynamic(state, t, control, params)),
         t_span=t, y0=state, atol=1e-5)
     return X_new.y[:,-1]
 
     # state_new = state + dt*Dynamic(state, dt, control, params)
-    # return state_new
+    return state_new
 
 def Dynamic(state,t,  control, params):
     
     pos_x = state[0]
     pos_y = state[1]
-    pos_yaw = state[2]
-    Beta    = state[3]
+    pos_yaw = wraptopi(state[2])
+    Beta    = wraptopi(state[3])
     r       = state[4]
     Ux      = state[5]
     FxR     = control[0]
@@ -84,8 +84,8 @@ def Dynamic(state,t,  control, params):
     a = params['L_f']
     b = params['L_r']
     L = params['L_f'] + params['L_r']
-    CaF = params['C_alpha']
-    CaR = params['C_alpha']
+    CaF = params['C_alphaF']
+    CaR = params['C_alphaR']
     mu = params['mu']
     FzF = params['load_f']
     FzR = params['load_r']
@@ -104,7 +104,7 @@ def Dynamic(state,t,  control, params):
     alphaR = np.arctan(Beta - b/Ux*r)
     if alphaR > math.pi/2 or alphaR < -math.pi/2:
         print("alphaR = %.2f"%(alphaR))
-    FyR = FialaRear(CaF, mu , FzR, FxR, alphaR)
+    FyR = FialaRear(CaR, mu , FzR, FxR, alphaR)
     # print("FyR = %.2f"%(FyR))
 
     Uy = Ux*np.tan(Beta)
@@ -146,8 +146,8 @@ def control(X, U , params):
     beta = X[3]
     r = X[4]
     v_x = X[5]
-    if v_x < 0.0001:
-        v_x = 0.0001
+    # if v_x < 0.0001:
+    #     v_x = 0.0001
 
     e_beta = beta - beta_eq
     r_des = r_eq + K_beta*e_beta
@@ -162,25 +162,34 @@ def control(X, U , params):
     FxR_des = FxR_eq - params['m'] * K_Ux * e_v_x
     FxR_des = np.min([FxR_des , FxR_max])
     FxR_des = np.max([FxR_des , 0])
+    print("*****FxR_des %.2f"%(FxR_des))
     
     alphaR = np.arctan(beta - params['L_r']/v_x*r) #todo
-    FyR_des = FialaRear(params['C_alpha'], params['mu'], params['load_r'], FxR_des , alphaR )
+    print("*****alphaR %.2f"%(alphaR))
+    
+    FyR_des = FialaRear(params['C_alphaR'], params['mu'], params['load_r'], FxR_des , alphaR )
+    print("*****FyR_des %.2f"%(FyR_des))
 
     FyF_des = 1/k1 * ( k2 * FyR_des - K_beta**2 * e_beta - K_beta * r_eq - (K_beta + K_r) * e_r )
-
+    
+    print("*****1 FyF_des %.2f"%(FyF_des))
 
     if np.abs(FyF_des) <= params['mu'] * (params['load_f']): #todo
         delta_des = FyF2delta(beta, r, v_x, FyF_des, params)
         action[0] = FxR_des
         action[1] = delta_des
-        print("Mode 1 , FyF %.2f , Fxr %.2f , Fyr %.2f , Delta %.2f "%(FyF_des , FxR_des, FyR_des ,delta_des))
+        print("Mode 1 , FyF %.2f , Fxr %.2f , Fyr %.2f , Delta %.2f "%(FyF_des , FxR_des, FyR_des ,delta_des/3.14*180))
     # mode 2
     else:
-        alphaF = np.arctan(beta + params['L_f']/v_x*r) - U[1]
-        FyF_des = -params['mu'] * params['load_f']* np.sign(alphaF)
+        # alphaF = np.arctan(beta + params['L_f']/v_x*r) - U[1]
+        # if alphaF
+        FyF_des = params['mu'] * params['load_f']#* np.sign(alphaF)
+        # print("*****2 FyF_des %.2f"%(FyF_des))
         FyR_des = 1/k2 * ( k1 * FyF_des + K_beta**2 * e_beta + K_beta * r_eq + (K_beta + K_r) * e_r )
+        # print("*****2 FyR_des %.2f"%(FyR_des))
         FyR_des = np.min([FyR_des , params['mu'] * params['load_r']])
         FyR_des = np.max([FyR_des , -params['mu'] * params['load_r']])
+
         
         FxR_des = np.sqrt((params['mu']*params['load_r'])**2 - (FyR_des)**2)
         FxR_des = np.min([FxR_des , FxR_max])
@@ -189,7 +198,7 @@ def control(X, U , params):
         delta_des = FyF2delta(beta, r,v_x,FyF_des,params)
         action[0] = FxR_des
         action[1] = delta_des
-        print("Mode 2 , FyF %.2f , Fxr %.2f , Fyr %.2f , Delta %.2f "%(FyF_des , FxR_des, FyR_des ,delta_des))
+        print("Mode 2 , FyF %.2f , Fxr %.2f , Fyr %.2f , Delta %.2f "%(FyF_des , FxR_des, FyR_des ,delta_des/3.14*180))
 
     delta_des = np.min([delta_des , delta_max])
     delta_des = np.max([delta_des , -delta_max])
@@ -206,27 +215,28 @@ def control(X, U , params):
 def simulation():
     stream = open('/home/xingjiansheng/Documents/src/workplace_xjs/drift/ratel_psi/src/car.yaml','r')
     params = yaml.load(stream)
-    model = BrushTireModel(params, 0.55, 0.55)
+    # model = BrushTireModel(params, 0.55, 0.55)
     renderer = _Renderer(params)
 
     state0 = np.zeros(6)
-    action_hardcode = np.array([2293.0, 0])
-    # action_hardcode = np.array([2293.0, -12*math.pi/180])
-    # state0[3] = 0 #(-20.44)*math.pi/180
-    # state0[4] = 0.600+0.2
-    state0[5] = 8
+    # action_hardcode = np.array([2293.0, 0])
+    action_hardcode = np.array([2293.0, -12*math.pi/180])
+    state0[3] = 0
+    state0[4] = 0.6 + 0.2
+    state0[5] = 8 + 3
     iterations = 1500
     dt = 0.02
-    flag = False
+
     for i in range(iterations):
         # print(state0)
-        if state0[5] > 12 :
-            action_hardcode[0] = 0
-            action_hardcode[1] = 0.3
+        # if state0[5] > 12 :
+        #     action_hardcode[0] = 0
+        #     action_hardcode[1] = 0.3
         
-        # action_hardcode = control(state0, action_hardcode, params)
+        action_hardcode = control(state0, action_hardcode, params)
         
         state0 = state_transition(state0, action_hardcode, dt, params)
+        print("state0 , bate %.2f , r %.2f , vx %.2f "%(state0[3] , state0[4], state0[5]))
         renderer.update(state0, action_hardcode)
 
 
