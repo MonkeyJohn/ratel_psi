@@ -41,6 +41,10 @@ def InverseFiala(FyF, params):
     c = np.abs(FyF - np.array(FyF_LUT))
     index = np.argmin(c)
     alphaF = alphaF_LUT[index]
+
+    FyF_test = FialaFront(params['C_alphaF'], params['mu'], params['load_f'], 0 , alphaF )
+    print("@@@@@@@FyF_test %.2f , FyF %.2f , alphaF %.2f "%(FyF_test, FyF, alphaF))
+
     return alphaF
 
 def FyF2delta(beta, r, Ux, FyF, params):
@@ -65,7 +69,7 @@ def state_transition(state, control, dt, params):
     return X_new.y[:,-1]
 
     # state_new = state + dt*Dynamic(state, dt, control, params)
-    return state_new
+    # return state_new
 
 def Dynamic(state,t,  control, params):
     
@@ -108,9 +112,13 @@ def Dynamic(state,t,  control, params):
     # print("FyR = %.2f"%(FyR))
 
     Uy = Ux*np.tan(Beta)
-    v = np.sqrt(Ux**2 + Uy**2)
-    pos_x_dot = v*np.cos(Beta+pos_yaw)
-    pos_y_dot = v*np.sin(Beta+pos_yaw)
+    # v = np.sqrt(Ux**2 + Uy**2)
+    # pos_x_dot = v*np.cos(Beta+pos_yaw)
+    # pos_y_dot = v*np.sin(Beta+pos_yaw)
+
+
+    pos_x_dot = Ux*np.cos(pos_yaw) - Uy*np.sin(pos_yaw)
+    pos_y_dot = Ux*np.sin(pos_yaw) + Uy*np.cos(pos_yaw)
 
     state_dot = np.zeros(6)
     state_dot[0] = pos_x_dot
@@ -136,7 +144,7 @@ def control(X, U , params):
     FxR_eq = 2293
     FyR_eq = 4469
 
-    delta_max = 35*math.pi/180
+    delta_max = 35*math.pi/180   # 
     FxR_max = params['mu'] * params['load_r']
 
     K_beta = 2
@@ -162,17 +170,17 @@ def control(X, U , params):
     FxR_des = FxR_eq - params['m'] * K_Ux * e_v_x
     FxR_des = np.min([FxR_des , FxR_max])
     FxR_des = np.max([FxR_des , 0])
-    print("*****FxR_des %.2f"%(FxR_des))
+    # print("*****FxR_des %.2f"%(FxR_des))
     
     alphaR = np.arctan(beta - params['L_r']/v_x*r) #todo
-    print("*****alphaR %.2f"%(alphaR))
+    print("*****alphaR %.2f "%(alphaR/3.14*180))
     
     FyR_des = FialaRear(params['C_alphaR'], params['mu'], params['load_r'], FxR_des , alphaR )
-    print("*****FyR_des %.2f"%(FyR_des))
+    # print("*****FyR_des %.2f"%(FyR_des))
 
     FyF_des = 1/k1 * ( k2 * FyR_des - K_beta**2 * e_beta - K_beta * r_eq - (K_beta + K_r) * e_r )
     
-    print("*****1 FyF_des %.2f"%(FyF_des))
+    # print("***** FyF_des %.2f"%(FyF_des))
 
     if np.abs(FyF_des) <= params['mu'] * (params['load_f']): #todo
         delta_des = FyF2delta(beta, r, v_x, FyF_des, params)
@@ -227,6 +235,8 @@ def simulation():
     iterations = 1500
     dt = 0.02
 
+    # state1 = np.zeros(6)
+
     for i in range(iterations):
         # print(state0)
         # if state0[5] > 12 :
@@ -236,7 +246,21 @@ def simulation():
         action_hardcode = control(state0, action_hardcode, params)
         
         state0 = state_transition(state0, action_hardcode, dt, params)
-        print("state0 , bate %.2f , r %.2f , vx %.2f "%(state0[3] , state0[4], state0[5]))
+        print("state0 , bate %.2f , r %.2f , vx %.2f "%(state0[3]/3.14*180 , state0[4], state0[5]))
+
+        # X = state1[0]
+        # Y = state1[1]
+        # Theta = state1[2]
+
+        # beta = state0[3]
+        # r = state0[4]
+        # Ux = state0[5]
+
+        # state1[2] = Theta + r*dt
+        # Uy = Ux*np.tan(beta)
+        # state1[0] = X + dt*(Ux*np.cos(Theta) - Uy*np.sin(Theta))
+        # state1[1] = Y + dt*(Ux*np.sin(Theta) + Uy*np.cos(Theta))
+        
         renderer.update(state0, action_hardcode)
 
 
