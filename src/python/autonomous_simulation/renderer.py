@@ -22,12 +22,13 @@ class _Renderer(object):
         self._y = []
 
         # Create visualization
-        plt.ion()
+        # plt.ion()
+        plt.gca()
         self._fig = plt.figure()
         self._ax = self._fig.add_subplot(111)
         self._ax.set_aspect('equal')
-        self._ax.set_xlim(-50, 50)
-        self._ax.set_ylim(-50, 50)
+        self._ax.set_xlim(-20, 20)
+        self._ax.set_ylim(-20, 20)
 
         # Draw remaining simulation
         self._trajectory, = self._ax.plot(self._x, self._y, 'b-')
@@ -53,6 +54,7 @@ class _Renderer(object):
         self._trajectory.set_ydata(self._y)
         self._draw_car(pos_x, pos_y, pos_yaw, steer)
         self._fig.canvas.draw()
+        # plt.show()
         plt.pause(0.001)
 
 

@@ -146,8 +146,8 @@ class DynamicBicycleModel(object):
             renderer.update(state0, action_hardcode)
 
 
-if __name__ == "__main__":
-    stream = open('/home/xingjiansheng/Documents/src/workplace_xjs/drift/ratel_psi/src/python/autonomous_simulation/car.yaml','r')
-    params = yaml.load(stream)
-    car_dyn = DynamicBicycleModel(params)
-    car_dyn.inc_steer_test(params)
+# if __name__ == "__main__":
+#     stream = open('/home/xingjiansheng/Documents/src/workplace_xjs/drift/ratel_psi/src/python/autonomous_simulation/car.yaml','r')
+#     params = yaml.load(stream)
+#     car_dyn = DynamicBicycleModel(params)
+#     car_dyn.inc_steer_test(params)
