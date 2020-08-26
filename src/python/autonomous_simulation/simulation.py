@@ -25,20 +25,20 @@ def cost(x, u):
     xd[0,0] = 1
     xd[1,0] = 1
 
-    x_curr = np.zeros((6,1),dtype=float)
-    x_curr[:,0] = x
-    u_curr = np.zeros((2,1),dtype=float)
-    u_curr[:,0] = u
+    # x_curr = np.zeros((6,1),dtype=float)
+    # x_curr[:,0] = x
+    # u_curr = np.zeros((2,1),dtype=float)
+    # u_curr[:,0] = u
 
     cu = np.array([[0.001 , 0.001]])
-    lu = cu*np.square(u_curr)
+    lu = cu*np.square(u)
     ldu = 0.0
 
     cx = np.array([[0.5, 0.1, 0.4, 0.05, 0.005, 0.002]])
-    lx = cx * np.square(x_curr - xd)
+    lx = cx * np.square(x - xd)
     ldx = 0.0
 
-    total_cost = lu[0,0] + lx[0.0]
+    total_cost = lu[0,0] + lx[0,0]
     return total_cost
 
 def final_cost(x):
@@ -67,7 +67,7 @@ def forward_pass(x0, u_s, T, model, params):
         unew[i] = clamp_to_limits(u_curr, params)
         dt = 0.02
         state = model.state_transition(x_curr[:,0], unew[i], dt)
-        total_cost += cost(x_curr[:,0], unew[:,i])
+        total_cost += cost(x_curr, unew[i])
         
         x_curr[:,0] = state
         xnew[i+1] = x_curr
@@ -89,7 +89,7 @@ def planner(model, params):
     xs , cost_cur = forward_pass(x0, us, T, model, params)
 
     fx = np.zeros((T+1, 6, 6), dtype=float)
-    fx = np.zeros((T+1, 6, 2), dtype=float)
+    fu = np.zeros((T+1, 6, 2), dtype=float)
     cx = np.zeros((T+1, 6), dtype=float)
     cu = np.zeros((T+1, 2), dtype=float)
     cxx = np.zeros((T+1, 6, 6), dtype=float)
@@ -108,9 +108,13 @@ def planner(model, params):
 
         #derivatives
         # dynamics_derivatives
+        eps = 0.001
         for t in range(T)
             for i in range(6)
-                plus = minus = xs[t,]
+                plus = minus = xs[t]
+                plus[i,0] += eps
+                minus[i,0] -= eps
+                fx[t,i]
 
 
 
