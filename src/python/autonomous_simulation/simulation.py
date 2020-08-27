@@ -75,6 +75,23 @@ def forward_pass(x0, u_s, T, model, params):
     total_cost += final_cost(x_curr[:,0])
     return xnew, total_cost
 
+def backward_pass(cx, cu, cxx, cxu, cuu, fx, fu, us, Vx, Vxx, k, K, dV):
+    Vx[T] = cx[T]
+    Vxx[T] = cxx[T]
+
+    Qx = np.zeros((6,1),dtype=float)
+    Qu = np.zeros((2,1),dtype=float)
+    Qxx = np.zeros((6,6),dtype=float)
+    Qux = np.zeros((2,6),dtype=float)
+    Quu = np.zeros((2,2), dtype=float)
+    k_i = np.zeros((2,1), dtype=float)
+    K_i = np.zeros((2,6), dtype=float)
+
+    for i in range(T-1,-1,-1):
+        
+
+
+
 def planner(model, params):
     x0 = np.zeros((6,1),dtype=float)
     xd = np.zeros((6,1),dtype=float)
@@ -97,10 +114,11 @@ def planner(model, params):
     cxx = np.zeros((T+1, 6, 6), dtype=float)
     cxu = np.zeros((T+1, 6, 2), dtype=float)
     cuu = np.zeros((T+1, 2, 2), dtype=float)
-    Vx = np.zeros((T+1, 6), dtype=float)
+    Vx = np.zeros((T+1, 6, 1), dtype=float)
     Vxx = np.zeros((T+1, 6, 6), dtype=float)
     L = np.zeros((T, 2, 6), dtype=float)
     l= np.zeros((T, 2), dtype=float)
+    dV = np.zeros((2, 1), dtype=float)
 
     maxIter = 30
     stop = False
@@ -111,29 +129,29 @@ def planner(model, params):
         #derivatives
         eps = 1e-4
         dt = 0.02
-        for t in range(T)
+        for t in range(T):
 
             # dynamics_derivatives
-            for i in range(6)
+            for i in range(6):
                 plus = minus = xs[t]
                 plus[i,0] += eps
                 minus[i,0] -= eps
                 fx[t,:,i] = (model.state_transition(plus[:,0], us[t,:,0], dt) - model.state_transition(minus[:,0], us[t,:,0], dt))/(2*eps)
 
-            for i in range(2)
+            for i in range(2):
                 plus = minus = us[t]
                 plus[i,0] += eps
                 minus[i,0] -= eps
                 fu[t,:,i] = (model.state_transition(xs[t,:,0], plus[:,0], dt) - model.state_transition(xs[t,:,0], minus[:,0], dt))/(2*eps)
 
             # get_cost_derivatives
-            for i in range(6)
+            for i in range(6):
                 plus = minus = xs[t]
                 plus[i,0] += eps
                 minus[i,0] -= eps
                 cx[t,i,0] = (cost(plus[:,0], us[t,:,0]) - cost(minus[:,0], us[t,:,0]))/(2*eps)
 
-            for i in range(2)
+            for i in range(2):
                 plus = minus = us[t]
                 plus[i,0] += eps
                 minus[i,0] -= eps
@@ -165,8 +183,15 @@ def planner(model, params):
             for i in range(2):
                 for j in range(2):
                     pp = pm = mp = mm = us[t]
-                    pp[i,]
+                    pp[i,0] = pm[i,0] += eps
+                    mp[i,0] = mm[i,0] -= eps
+                    pp[j,0] = mp[j,0] += eps
+                    pm[j,0] = mm[j,0] -= eps
+                    cuu[t,i,j] = cuu[t,j,i] = (cost(xs[t,:,0], pp[:,0]) - cost(xs[t,:,0], mp[:,0]) - cost(xs[t,:,0],pm[:,0]) + cost(xs[t,:,0],mm[:,0]))/(4*eps*eps)
 
+        backPassDone = False
+        while backPassDone==False:
+            backward_pass(cx, cu, cxx, cxu, cuu, fx, fu, u, Vx, Vxx, l, L, dV)
 
 
 def simulation():
