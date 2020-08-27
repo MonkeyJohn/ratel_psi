@@ -80,8 +80,10 @@ def planner(model, params):
     xd = np.zeros((6,1),dtype=float)
     xd[0,0] = 1
     xd[1,0] = 1
-    us = np.zeros((T, 2, 1), dtype=float)
+
     T = 50  # horizon
+    us = np.zeros((T, 2, 1), dtype=float)
+
     for i in range(T):
         us[i,0,0] = 1.0
         us[i,1,0] = 0.3
@@ -90,8 +92,8 @@ def planner(model, params):
 
     fx = np.zeros((T+1, 6, 6), dtype=float)
     fu = np.zeros((T+1, 6, 2), dtype=float)
-    cx = np.zeros((T+1, 6), dtype=float)
-    cu = np.zeros((T+1, 2), dtype=float)
+    cx = np.zeros((T+1, 6, 1), dtype=float)
+    cu = np.zeros((T+1, 2, 1), dtype=float)
     cxx = np.zeros((T+1, 6, 6), dtype=float)
     cxu = np.zeros((T+1, 6, 2), dtype=float)
     cuu = np.zeros((T+1, 2, 2), dtype=float)
@@ -107,15 +109,63 @@ def planner(model, params):
             break
 
         #derivatives
-        # dynamics_derivatives
-        eps = 0.001
+        eps = 1e-4
+        dt = 0.02
         for t in range(T)
+
+            # dynamics_derivatives
             for i in range(6)
                 plus = minus = xs[t]
                 plus[i,0] += eps
                 minus[i,0] -= eps
-                fx[t,i]
+                fx[t,:,i] = (model.state_transition(plus[:,0], us[t,:,0], dt) - model.state_transition(minus[:,0], us[t,:,0], dt))/(2*eps)
 
+            for i in range(2)
+                plus = minus = us[t]
+                plus[i,0] += eps
+                minus[i,0] -= eps
+                fu[t,:,i] = (model.state_transition(xs[t,:,0], plus[:,0], dt) - model.state_transition(xs[t,:,0], minus[:,0], dt))/(2*eps)
+
+            # get_cost_derivatives
+            for i in range(6)
+                plus = minus = xs[t]
+                plus[i,0] += eps
+                minus[i,0] -= eps
+                cx[t,i,0] = (cost(plus[:,0], us[t,:,0]) - cost(minus[:,0], us[t,:,0]))/(2*eps)
+
+            for i in range(2)
+                plus = minus = us[t]
+                plus[i,0] += eps
+                minus[i,0] -= eps
+                cu[t,i,0] = (cost(xs[t,:,0], plus[:,0]) - cost(xs[t,:,0], minus[:,0]))/(2*eps)
+
+            #get_cost_2nd_derivatives
+            #cxx
+            for i in range(6):
+                for j in range(i,6):
+                    pp = pm = mp = mm = xs[t]
+                    pp[i,0] = pm[i,0] += eps
+                    mp[i,0] = mm[i,0] -= eps
+                    pp[j,0] = mp[j,0] += eps
+                    pm[j,0] = mm[j,0] -= eps
+                    cxx[t,i,j] = cxx[t,j,i] = (cost(pp[:,0],us[t,:,0]) - cost(pm[:,0],us[t,:,0]) - cost(mp[:,0],us[t,:,0]) + cost(mm[:,0],us[t,:,0]))/(4*eps*eps)
+
+            #cxu
+            for i in range(6):
+                for j in range(2):
+                    px = mx = xs[t]
+                    pu = mu = us[t]
+                    px[i,0] += eps
+                    mx[i,0] -= eps
+                    pu[j,0] += eps
+                    mu[j,0] -= eps
+                    cxu[t,i,j] = (cost(px[:,0],pu[:,0]) - cost(mx[:,0],pu[:,0]) - cost(px[:,0],mu[:,0]) + cost(mx[:,0],mu[:,0]))/(4*eps*eps)
+
+            #cuu
+            for i in range(2):
+                for j in range(2):
+                    pp = pm = mp = mm = us[t]
+                    pp[i,]
 
 
 
