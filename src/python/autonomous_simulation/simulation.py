@@ -88,7 +88,18 @@ def backward_pass(cx, cu, cxx, cxu, cuu, fx, fu, us, Vx, Vxx, k, K, dV):
     K_i = np.zeros((2,6), dtype=float)
 
     for i in range(T-1,-1,-1):
-        
+        Qx = cx[i] + fx[i].T * Vx[i+1]
+        Qu = cu[i] + fu[i].T * Vx[i+1]
+
+        Qxx = cxx[i] + fx[i].T * Vxx[i+1] * fx[i]
+        Qux = cxu[i].T +fu[i].T * Vxx[i+1] * fx[i]
+        Quu = cuu[i] + fu[i].T * Vxx[i+1]* fu[i]
+
+        Vxx_reg = Vxx[i+1]
+        Qux_reg = cxu[i].T + fu[i].T * Vxx_reg * fx[i]
+        lambda = 1.0
+        Eye2 = np.identity(2)
+        QuuF = cuu[i] + fu[i].T * Vxx_reg * fu[i] + lambda * Eye2
 
 
 
