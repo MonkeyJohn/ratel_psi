@@ -46,7 +46,7 @@ def clamp_to_limits(u_curr, params):
     u_clamped[1,0] = min(params['u1_max'],max(params['u1_min'],u_curr[1,0]))
     return u_clamped
 
-def forward_pass(x0, u_s, T, model, params):
+def forward_pass(x0, u_s, T, x, L, init_forward, model, params):
     xnew = np.zeros((T+1,6,1),dtype=float)
     unew = np.zeros((T,2,1),dtype=float)
     xnew[0] = x0
@@ -57,7 +57,9 @@ def forward_pass(x0, u_s, T, model, params):
     for i in range(T):
         u_curr = u_s[i]
 
-        # todo this
+        if not init_forward:
+            dx = xnew[i] - x[i]
+            u_curr += L[i] @ dx
 
         unew[i] = clamp_to_limits(u_curr, params)
         dt = 0.02
@@ -68,7 +70,7 @@ def forward_pass(x0, u_s, T, model, params):
         xnew[i+1] = x_curr
 
     total_cost += final_cost(x_curr[:,0])
-    return xnew, total_cost
+    return xnew, unew , total_cost
 
 def boxQP(H, g, x0, params):
     
@@ -90,7 +92,7 @@ def boxQP(H, g, x0, params):
     x = clamp_to_limits(x0,params)
 
     value = np.dot(x.T,g) + 0.5 * (x.T @ H @ x)
-    print("*****Start BoxQp initvalue: %.2f  "%(value[0,0]))
+    # print("*****Start BoxQp initvalue: %.2f  "%(value[0,0]))
 
     result = 0
     nfactor = 0
@@ -219,7 +221,12 @@ def boxQP(H, g, x0, params):
 
     return result, x, Hfree, free_v
 
-def backward_pass(cx, cu, cxx, cxu, cuu, fx, fu, us, Vx, Vxx, k, K):
+def backward_pass(cx, cu, cxx, cxu, cuu, fx, fu, us, T, lamb):
+    Vx = np.zeros((T+1, 6, 1), dtype=float)
+    Vxx = np.zeros((T+1, 6, 6), dtype=float)
+    K = np.zeros((T, 2, 6), dtype=float)
+    k = np.zeros((T, 2, 1), dtype=float)
+
     Vx[T] = cx[T]
     Vxx[T] = cxx[T]
 
@@ -236,21 +243,22 @@ def backward_pass(cx, cu, cxx, cxu, cuu, fx, fu, us, Vx, Vxx, k, K):
         Qx = cx[i] + fx[i].T * Vx[i+1]
         Qu = cu[i] + fu[i].T * Vx[i+1]
 
-        Qxx = cxx[i] + fx[i].T * Vxx[i+1] * fx[i]
-        Qux = cxu[i].T +fu[i].T * Vxx[i+1] * fx[i]
-        Quu = cuu[i] + fu[i].T * Vxx[i+1]* fu[i]
+        Qxx = cxx[i] + fx[i].T @ Vxx[i+1] @ fx[i]
+        Qux = cxu[i].T + fu[i].T @ Vxx[i+1] @ fx[i]
+        Quu = cuu[i] + fu[i].T @ Vxx[i+1] @ fu[i]
 
         Vxx_reg = Vxx[i+1]
-        Qux_reg = cxu[i].T + fu[i].T * Vxx_reg * fx[i]
-        lambda1 = 1.0
+        Qux_reg = cxu[i].T + fu[i].T @ Vxx_reg @ fx[i]
+        # lambda1 = 1.0
         Eye2 = np.identity(2)
-        QuuF = cuu[i] + fu[i].T * Vxx_reg * fu[i] + lambda1 * Eye2
+        QuuF = cuu[i] + fu[i].T @ Vxx_reg @ fu[i] + lamb * Eye2
 
         result, k_i, R, free_v = boxQP(QuuF, Qu, k[min(i+1,T-1)], params)
 
         if result < 1:
-            print("result < 1")
-            return i
+            print("@@@@@ result < 1")
+            result = i
+            break
         
 
         if free_v[0,0] == 1 and free_v[1,0] == 1:
@@ -272,25 +280,31 @@ def backward_pass(cx, cu, cxx, cxu, cuu, fx, fu, us, Vx, Vxx, k, K):
         Vxx[i] = Qxx + K_i.T @ Quu @ K_i + K_i.T @ Qux + Qux.T @ K_i
         Vxx[i] = 0.5 * (Vxx[i] + Vxx[i].T)
     
-    k[i] = k_i
-    K[i] = K_i
+        k[i] = k_i
+        K[i] = K_i
 
-    return Vx, Vxx, k , K, dV
+    result = 0
+    return result, Vx, Vxx, k , K, dV
+
+def adjust_u(u,l,alpha):
+    new_u = u
+    new_u += alpha * l
+    return new_u
 
 def planner(model, params):
     x0 = np.zeros((6,1),dtype=float)
     xd = np.zeros((6,1),dtype=float)
     xd[0,0] = 1
     xd[1,0] = 1
+    cost_s = 0.0
 
     T = 50  # horizon
     us = np.zeros((T, 2, 1), dtype=float)
-
     for i in range(T):
         us[i,0,0] = 1.0
         us[i,1,0] = 0.3
-    
-    xs , cost_cur = forward_pass(x0, us, T, model, params)
+
+    xs = np.zeros((T+1,6,1),dtype=float)
 
     fx = np.zeros((T+1, 6, 6), dtype=float)
     fu = np.zeros((T+1, 6, 2), dtype=float)
@@ -302,81 +316,123 @@ def planner(model, params):
     Vx = np.zeros((T+1, 6, 1), dtype=float)
     Vxx = np.zeros((T+1, 6, 6), dtype=float)
     L = np.zeros((T, 2, 6), dtype=float)
-    l= np.zeros((T, 2), dtype=float)
+    l= np.zeros((T, 2, 1), dtype=float)
     dV = np.zeros((2, 1), dtype=float)
+    Alpha = np.array([1.0000, 0.5012, 0.2512, 0.1259, 0.0631, 0.0316, 0.0158, 0.0079, 0.0040, 0.0020, 0.0010])
+    tolFun = 1e-6
+
+    init_forward = True
+    xs , us , cost_s = forward_pass(x0, us, T,  x, L, init_forward, model, params)
+    print("***** Initial cost : %.2f  "%(cost_s))
+
+    x = xs
+    u = us
 
     maxIter = 30
+    dcost = 0.0
     stop = False
-    for i in range(maxIter):
+    diverge = 0
+    lamb = 1.0
+    flgChange = True
+    for iter in range(maxIter):
         if stop:
             break
 
-        #derivatives
-        eps = 1e-4
-        dt = 0.02
-        for t in range(T):
+        # STEP 1: Differentiate dynamics and cost along new trajectory
+        # derivatives
+        if flgChange :
 
-            # dynamics_derivatives
-            for i in range(6):
-                plus = minus = xs[t]
-                plus[i,0] += eps
-                minus[i,0] -= eps
-                fx[t,:,i] = (model.state_transition(plus[:,0], us[t,:,0], dt) - model.state_transition(minus[:,0], us[t,:,0], dt))/(2*eps)
+            eps = 1e-4
+            dt = 0.02
+            for t in range(T):
 
-            for i in range(2):
-                plus = minus = us[t]
-                plus[i,0] += eps
-                minus[i,0] -= eps
-                fu[t,:,i] = (model.state_transition(xs[t,:,0], plus[:,0], dt) - model.state_transition(xs[t,:,0], minus[:,0], dt))/(2*eps)
+                # dynamics_derivatives
+                for i in range(6):
+                    plus = minus = xs[t]
+                    plus[i,0] += eps
+                    minus[i,0] -= eps
+                    fx[t,:,i] = (model.state_transition(plus[:,0], us[t,:,0], dt) - model.state_transition(minus[:,0], us[t,:,0], dt))/(2*eps)
 
-            # get_cost_derivatives
-            for i in range(6):
-                plus = minus = xs[t]
-                plus[i,0] += eps
-                minus[i,0] -= eps
-                cx[t,i,0] = (cost(plus[:,0], us[t,:,0]) - cost(minus[:,0], us[t,:,0]))/(2*eps)
+                for i in range(2):
+                    plus = minus = us[t]
+                    plus[i,0] += eps
+                    minus[i,0] -= eps
+                    fu[t,:,i] = (model.state_transition(xs[t,:,0], plus[:,0], dt) - model.state_transition(xs[t,:,0], minus[:,0], dt))/(2*eps)
 
-            for i in range(2):
-                plus = minus = us[t]
-                plus[i,0] += eps
-                minus[i,0] -= eps
-                cu[t,i,0] = (cost(xs[t,:,0], plus[:,0]) - cost(xs[t,:,0], minus[:,0]))/(2*eps)
+                # get_cost_derivatives
+                for i in range(6):
+                    plus = minus = xs[t]
+                    plus[i,0] += eps
+                    minus[i,0] -= eps
+                    cx[t,i,0] = (cost(plus[:,0], us[t,:,0]) - cost(minus[:,0], us[t,:,0]))/(2*eps)
 
-            #get_cost_2nd_derivatives
-            #cxx
-            for i in range(6):
-                for j in range(i,6):
-                    pp = pm = mp = mm = xs[t]
-                    pp[i,0] = pm[i,0] += eps
-                    mp[i,0] = mm[i,0] -= eps
-                    pp[j,0] = mp[j,0] += eps
-                    pm[j,0] = mm[j,0] -= eps
-                    cxx[t,i,j] = cxx[t,j,i] = (cost(pp[:,0],us[t,:,0]) - cost(pm[:,0],us[t,:,0]) - cost(mp[:,0],us[t,:,0]) + cost(mm[:,0],us[t,:,0]))/(4*eps*eps)
+                for i in range(2):
+                    plus = minus = us[t]
+                    plus[i,0] += eps
+                    minus[i,0] -= eps
+                    cu[t,i,0] = (cost(xs[t,:,0], plus[:,0]) - cost(xs[t,:,0], minus[:,0]))/(2*eps)
 
-            #cxu
-            for i in range(6):
-                for j in range(2):
-                    px = mx = xs[t]
-                    pu = mu = us[t]
-                    px[i,0] += eps
-                    mx[i,0] -= eps
-                    pu[j,0] += eps
-                    mu[j,0] -= eps
-                    cxu[t,i,j] = (cost(px[:,0],pu[:,0]) - cost(mx[:,0],pu[:,0]) - cost(px[:,0],mu[:,0]) + cost(mx[:,0],mu[:,0]))/(4*eps*eps)
+                #get_cost_2nd_derivatives
+                #cxx
+                for i in range(6):
+                    for j in range(i,6):
+                        pp = pm = mp = mm = xs[t]
+                        pp[i,0] = pm[i,0] += eps
+                        mp[i,0] = mm[i,0] -= eps
+                        pp[j,0] = mp[j,0] += eps
+                        pm[j,0] = mm[j,0] -= eps
+                        cxx[t,i,j] = cxx[t,j,i] = (cost(pp[:,0],us[t,:,0]) - cost(pm[:,0],us[t,:,0]) - cost(mp[:,0],us[t,:,0]) + cost(mm[:,0],us[t,:,0]))/(4*eps*eps)
 
-            #cuu
-            for i in range(2):
-                for j in range(2):
-                    pp = pm = mp = mm = us[t]
-                    pp[i,0] = pm[i,0] += eps
-                    mp[i,0] = mm[i,0] -= eps
-                    pp[j,0] = mp[j,0] += eps
-                    pm[j,0] = mm[j,0] -= eps
-                    cuu[t,i,j] = cuu[t,j,i] = (cost(xs[t,:,0], pp[:,0]) - cost(xs[t,:,0], mp[:,0]) - cost(xs[t,:,0],pm[:,0]) + cost(xs[t,:,0],mm[:,0]))/(4*eps*eps)
+                #cxu
+                for i in range(6):
+                    for j in range(2):
+                        px = mx = xs[t]
+                        pu = mu = us[t]
+                        px[i,0] += eps
+                        mx[i,0] -= eps
+                        pu[j,0] += eps
+                        mu[j,0] -= eps
+                        cxu[t,i,j] = (cost(px[:,0],pu[:,0]) - cost(mx[:,0],pu[:,0]) - cost(px[:,0],mu[:,0]) + cost(mx[:,0],mu[:,0]))/(4*eps*eps)
 
+                #cuu
+                for i in range(2):
+                    for j in range(i,2):
+                        pp = pm = mp = mm = us[t]
+                        pp[i,0] = pm[i,0] += eps
+                        mp[i,0] = mm[i,0] -= eps
+                        pp[j,0] = mp[j,0] += eps
+                        pm[j,0] = mm[j,0] -= eps
+                        cuu[t,i,j] = cuu[t,j,i] = (cost(xs[t,:,0], pp[:,0]) - cost(xs[t,:,0], mp[:,0]) - cost(xs[t,:,0],pm[:,0]) + cost(xs[t,:,0],mm[:,0]))/(4*eps*eps)
+            flgChange = False
+
+        # STEP 2: Backward pass, compute optimal control law and cost-to-go  
         backPassDone = False
-        while backPassDone==False:
-            backward_pass(cx, cu, cxx, cxu, cuu, fx, fu, u, Vx, Vxx, l, L)
+        while not backPassDone:
+            diverge, Vx, Vxx, l , L, dV  = backward_pass(cx, cu, cxx, cxu, cuu, fx, fu, u, T, lamb)
+            if diverge != 0:
+                
+
+            backPassDone = True
+
+        # STEP 3: Forward pass / line-search to find new control sequence, trajectory, cost
+        fwdPassDone = False
+        if backPassDone:
+            for i in range(Alpha.shape[0]):
+                alpha = Alpha[i]
+                xnew , new_cost, unew = forward_pass(x0, adjust_u(us,l,alpha), T, x, L, init_forward, model, params)
+                dcost = cost_s - new_cost
+
+        # STEP 4: accept step (or not), print status
+        if fwdPassDone:
+            
+            # accept changes
+	 		us        = unew
+	 		xs        = xnew
+	 		cost_s    = new_cost
+
+            if dcost < tolFun:
+                print("SUCCESS: cost change < tolFun")
+                break
 
 
 def control(X, U , params):
