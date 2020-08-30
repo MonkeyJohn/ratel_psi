@@ -14,11 +14,6 @@ def wraptopi(val):
     val = val - 2*pi*np.floor((val+pi)/(2*pi))
     return val
 
-def control(X, U , params):
-    action = np.array([15, 0.3])
-
-    return action
-
 def cost(x, u):
 
     xd = np.zeros((6,1),dtype=float)
@@ -46,9 +41,9 @@ def final_cost(x):
     return res_cost
 
 def clamp_to_limits(u_curr, params):
-    u_clamped = np.zeros(2,dtype=float)
-    u_clamped[0] = min(params['u0_max'],max(params['u0_min'],u_curr[0,0]))
-    u_clamped[1] = min(params['u1_max'],max(params['u1_min'],u_curr[1,0]))
+    u_clamped = np.zeros((2,1),dtype=float)
+    u_clamped[0,0] = min(params['u0_max'],max(params['u0_min'],u_curr[0,0]))
+    u_clamped[1,0] = min(params['u1_max'],max(params['u1_min'],u_curr[1,0]))
     return u_clamped
 
 def forward_pass(x0, u_s, T, model, params):
@@ -75,7 +70,156 @@ def forward_pass(x0, u_s, T, model, params):
     total_cost += final_cost(x_curr[:,0])
     return xnew, total_cost
 
-def backward_pass(cx, cu, cxx, cxu, cuu, fx, fu, us, Vx, Vxx, k, K, dV):
+def boxQP(H, g, x0, params):
+    
+    Hfree = np.zeros((2,2),dtype=float)
+    free_v = np.zeros((2,1),dtype=int)
+
+    maxIter = 100
+    minGrad = 1e-8
+    minRelImprove = 1e-8
+    stepDec = 0.6
+    minStep = 1e-22
+    Armijo = 0.1
+
+    lower = np.array([[params['u0_min']],
+                    [params['u1_min']]])
+    upper = np.array([[params['u0_max']],
+                    [params['u1_max']]])
+
+    x = clamp_to_limits(x0,params)
+
+    value = np.dot(x.T,g) + 0.5 * (x.T @ H @ x)
+    print("*****Start BoxQp initvalue: %.2f  "%(value[0,0]))
+
+    result = 0
+    nfactor = 0
+    oldvalue = np.zeros((1,1),dtype=float)
+    factorize = False
+
+    clamped = np.zeros((2,1),dtype=int)
+    old_clamped = np.zeros((2,1),dtype=int)
+
+    for iter in range(maxIter):
+        if result != 0:
+            break
+
+        if (iter > 0) and (oldvalue - value)[0,0] < minRelImprove * np.abs(oldvalue[0,0]):
+            result = 4
+            break
+
+        oldvalue = value
+        
+        # Get gradient
+        grad = g + H @ x
+
+        old_clamped = clamped
+        clamped = np.zeros((2,1),dtype=int)
+        free_v = np.ones((2,1),dtype=int)
+
+        for i in range(2):
+            if np.abs(x[i,0] - lower[i,0]) < 1e-3 and grad[i,0] > 0:
+                clamped[i,0] = 1
+                free_v[i,0] = 0
+            elif np.abs(x[i,0] - upper[i,0]) < 1e-3 and grad[i,0] < 0:
+                clamped[i,0] = 1
+                free_v[i,0] = 0
+        
+        if clamped.sum() == 2:
+            result = 6
+            break
+
+        if iter == 0:
+            factorize = True
+        elif (old_clamped - clamped).sum() != 0:
+            factorize = True
+        else:
+            factorize = False
+
+        if factorize:
+            n_free = free_v.sum()
+            # print("*****n_free : %d  "%(n_free))
+            # print("*****H")
+            print(H)
+
+            if free_v[0,0] == 1:
+                Hf = H[0:n_free,0:n_free]
+                # print("first")
+            else:
+                Hf = H[1:(n_free+1),1:(n_free+1)]
+                # print("second")
+            
+            Hfree = np.zeros((n_free,n_free), dtype=float)
+
+            # print("*****Hf")
+            print(Hf)
+            Hfree = np.linalg.cholesky(Hf).T
+
+            nfactor+=1
+        
+        gnorm = np.linalg.norm(grad * free_v)
+        if gnorm < minGrad:
+            result = 5
+            break
+
+        grad_clamped = g + H @ (x * clamped)
+
+
+        grad_clamped_all = grad_clamped[free_v > 0]
+        # print("*****grad_clamped_all")
+        # print(grad_clamped_all)
+        grad_clamped_need = grad_clamped_all.reshape(grad_clamped_all.shape[0],1)
+
+        x_all = x[free_v > 0]
+        # print("*****x_all")
+        # print(x_all)
+        x_need = x_all.reshape(x_all.shape[0],1)
+
+        search = np.zeros((2,1), dtype=float)
+
+        # print("*****Hfree")
+        # print(Hfree)
+
+        # print("*****np.linalg.inv(Hfree)")
+        # print(np.linalg.inv(Hfree))
+
+        search_need = -np.linalg.inv(Hfree) @ (np.linalg.inv(Hfree.T) @ grad_clamped_need) - x_need
+
+        if free_v[0,0] == 1 and free_v[1,0] == 1:
+            search = search_need
+        elif free_v[0,0] == 1:
+            search[0,0] = search_need[0,0]
+        elif free_v[1,0] == 1:
+            search[1,0] = search_need[0,0]
+
+        sdotg = (search * grad).sum()
+
+        if sdotg >= 0:
+            break
+
+
+		#Armijo line search
+        step = 1
+        nstep = 0
+        reach = x + step * search
+        xc = clamp_to_limits(reach,params)
+        vc = xc.T @ g + 0.5 * ( xc.T @ H @ xc)
+
+        while (vc[0,0] - oldvalue[0,0])/(step * sdotg) < Armijo :
+            step *= stepDec
+            nstep+= 1
+            reach = x + step * search
+            xc = clamp_to_limits(reach,params)
+            vc = xc.T @ g + 0.5 * ( xc.T @ H @ xc)
+            if step < minStep :
+                result = 2
+                break
+        x = xc
+        value = vc
+
+    return result, x, Hfree, free_v
+
+def backward_pass(cx, cu, cxx, cxu, cuu, fx, fu, us, Vx, Vxx, k, K):
     Vx[T] = cx[T]
     Vxx[T] = cxx[T]
 
@@ -86,6 +230,7 @@ def backward_pass(cx, cu, cxx, cxu, cuu, fx, fu, us, Vx, Vxx, k, K, dV):
     Quu = np.zeros((2,2), dtype=float)
     k_i = np.zeros((2,1), dtype=float)
     K_i = np.zeros((2,6), dtype=float)
+    dV = np.zeros((2,1), dtype=float)
 
     for i in range(T-1,-1,-1):
         Qx = cx[i] + fx[i].T * Vx[i+1]
@@ -97,11 +242,40 @@ def backward_pass(cx, cu, cxx, cxu, cuu, fx, fu, us, Vx, Vxx, k, K, dV):
 
         Vxx_reg = Vxx[i+1]
         Qux_reg = cxu[i].T + fu[i].T * Vxx_reg * fx[i]
-        lambda = 1.0
+        lambda1 = 1.0
         Eye2 = np.identity(2)
-        QuuF = cuu[i] + fu[i].T * Vxx_reg * fu[i] + lambda * Eye2
+        QuuF = cuu[i] + fu[i].T * Vxx_reg * fu[i] + lambda1 * Eye2
 
+        result, k_i, R, free_v = boxQP(QuuF, Qu, k[min(i+1,T-1)], params)
 
+        if result < 1:
+            print("result < 1")
+            return i
+        
+
+        if free_v[0,0] == 1 and free_v[1,0] == 1:
+            Lfree = -np.linalg.inv(R)@(np.linalg.inv(R.T) @ Qux_reg)
+            K_i = Lfree
+        elif free_v[0,0] == 1:
+            Qux_reg_need = Qux_reg[0,:]
+            Lfree = -np.linalg.inv(R)@(np.linalg.inv(R.T) @ Qux_reg_need)
+            K_i[0,:] = Lfree
+        elif free_v[1,0] == 1:
+            Qux_reg_need = Qux_reg[1,:]
+            Lfree = -np.linalg.inv(R)@(np.linalg.inv(R.T) @ Qux_reg_need)
+            K_i[1,:] = Lfree
+
+        dV[0,0] = k_i.T @ Qu
+        dV[1,0] = 0.5 *(k_i.T @ Quu @ k_i)
+
+        Vx[i] = Qx + K_i.T @ Quu @ k_i + K_i.T @ Qu + Qux.T @ k_i
+        Vxx[i] = Qxx + K_i.T @ Quu @ K_i + K_i.T @ Qux + Qux.T @ K_i
+        Vxx[i] = 0.5 * (Vxx[i] + Vxx[i].T)
+    
+    k[i] = k_i
+    K[i] = K_i
+
+    return Vx, Vxx, k , K, dV
 
 def planner(model, params):
     x0 = np.zeros((6,1),dtype=float)
@@ -202,11 +376,17 @@ def planner(model, params):
 
         backPassDone = False
         while backPassDone==False:
-            backward_pass(cx, cu, cxx, cxu, cuu, fx, fu, u, Vx, Vxx, l, L, dV)
+            backward_pass(cx, cu, cxx, cxu, cuu, fx, fu, u, Vx, Vxx, l, L)
+
+
+def control(X, U , params):
+    action = np.array([15, 0.3])
+
+    return action
 
 
 def simulation():
-    stream = open('/home/xingjiansheng/Documents/src/workplace_xjs/drift/ratel_psi/src/python/autonomous_simulation/car.yaml','r')
+    stream = open('/home/xingjiansheng/Workplace/project/MotionPlanner/Drift/ratel_psi/src/python/autonomous_simulation/car.yaml','r')
     params = yaml.load(stream)
     model = DynamicBicycleModel(params)
     renderer = _Renderer(params)
@@ -216,7 +396,7 @@ def simulation():
     iterations = 1500
     dt = 0.02
 
-    planner(model, params)
+    # planner(model, params)
 
     for i in range(iterations):
         # print(state0)
@@ -231,6 +411,27 @@ def simulation():
         
         renderer.update(state0, action_hardcode)
 
+def test_box_QP():
+    stream = open('/home/xingjiansheng/Workplace/project/MotionPlanner/Drift/ratel_psi/src/python/autonomous_simulation/car.yaml','r')
+    params = yaml.load(stream)
+    g = np.array([[0],
+                  [0]])
+    H = np.array([[1 , 0],
+                  [0 , 1]])
+    H = H @ H.T
+
+    x0 = np.array([[-1.5],
+                    [-2]])
+    result, x, Hfree, free_v = boxQP(H, g, x0, params)
+
+    print("result :")
+    print(result)
+    print(" x : ")
+    print(x)
+    print(Hfree)
+    print(free_v)
+
 
 if __name__ == "__main__":
     simulation()
+    # test_box_QP()
