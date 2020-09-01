@@ -322,7 +322,7 @@ def planner(model, params):
     tolFun = 1e-6
 
     init_forward = True
-    xs , us , cost_s = forward_pass(x0, us, T,  x, L, init_forward, model, params)
+    xs , us , cost_s = forward_pass(x0, us, T,  xs, L, init_forward, model, params)
     print("***** Initial cost : %.2f  "%(cost_s))
 
     x = xs
@@ -330,9 +330,16 @@ def planner(model, params):
 
     maxIter = 30
     dcost = 0.0
+	# z = 0.0
+    zMin = 0.0
+	# expected = 0.0
     stop = False
     diverge = 0
     lamb = 1.0
+    lambdaFactor = 1.6
+    lambdaMax = 1e11
+    lambdaMin = 1e-8
+    dlambda = 1.0
     flgChange = True
     for iter in range(maxIter):
         if stop:
@@ -410,8 +417,11 @@ def planner(model, params):
         while not backPassDone:
             diverge, Vx, Vxx, l , L, dV  = backward_pass(cx, cu, cxx, cxu, cuu, fx, fu, u, T, lamb)
             if diverge != 0:
-                
-
+                dlambda = max(dlambda * lambdaFactor, lambdaFactor)
+                lamb = max(lamb * dlambda, lambdaMin)
+                if lamb > lambdaMax:
+                    break
+                continue
             backPassDone = True
 
         # STEP 3: Forward pass / line-search to find new control sequence, trajectory, cost
@@ -419,21 +429,45 @@ def planner(model, params):
         if backPassDone:
             for i in range(Alpha.shape[0]):
                 alpha = Alpha[i]
-                xnew , new_cost, unew = forward_pass(x0, adjust_u(us,l,alpha), T, x, L, init_forward, model, params)
+                xnew , unew, new_cost = forward_pass(x0, adjust_u(us,l,alpha), T, x, L, init_forward, model, params)
                 dcost = cost_s - new_cost
+                expected = -alpha * (dV[0,0] + alpha * dV[1,0])
+
+                if expected > 0:
+                    z = dcost/expected
+                else:
+                    z = np.sign(dcost)
+
+                if z > zMin:
+                    fwdPassDone = True
+                    break
+            if not fwdPassDone:
+                alpha = 0.0
 
         # STEP 4: accept step (or not), print status
         if fwdPassDone:
-            
+
+            #decrease lambda   
+            dlambda = min(dlambda / lambdaFactor, 1/lambdaFactor)
+            if lamb > lambdaMin:
+                templamb = 1
+            else:
+                templamb = 0
+            lamb = lamb * dlambda * templamb           
             # accept changes
 	 		us        = unew
 	 		xs        = xnew
 	 		cost_s    = new_cost
+            flgChange = True
 
             if dcost < tolFun:
                 print("SUCCESS: cost change < tolFun")
                 break
-
+        else :
+            dlambda = max(dlambda * lambdaFactor, lambdaFactor)
+            lamb = max(lamb * dlambda, lambdaMin)
+            if lamb > lambdaMax:
+                break
 
 def control(X, U , params):
     action = np.array([15, 0.3])
