@@ -65,7 +65,6 @@ def forward_pass(x0, u_s, T, x, L, init_forward, model, params):
         dt = 0.02
         state = model.state_transition(x_curr[:,0], unew[i], dt)
         total_cost += cost(x_curr, unew[i])
-        
         x_curr[:,0] = state
         xnew[i+1] = x_curr
 
@@ -142,7 +141,7 @@ def boxQP(H, g, x0, params):
             n_free = free_v.sum()
             # print("*****n_free : %d  "%(n_free))
             # print("*****H")
-            print(H)
+            # print(H)
 
             if free_v[0,0] == 1:
                 Hf = H[0:n_free,0:n_free]
@@ -154,7 +153,7 @@ def boxQP(H, g, x0, params):
             Hfree = np.zeros((n_free,n_free), dtype=float)
 
             # print("*****Hf")
-            print(Hf)
+            # print(Hf)
             Hfree = np.linalg.cholesky(Hf).T
 
             nfactor+=1
@@ -221,7 +220,7 @@ def boxQP(H, g, x0, params):
 
     return result, x, Hfree, free_v
 
-def backward_pass(cx, cu, cxx, cxu, cuu, fx, fu, us, T, lamb):
+def backward_pass(cx, cu, cxx, cxu, cuu, fx, fu, us, T, lamb, params):
     Vx = np.zeros((T+1, 6, 1), dtype=float)
     Vxx = np.zeros((T+1, 6, 6), dtype=float)
     K = np.zeros((T, 2, 6), dtype=float)
@@ -240,8 +239,8 @@ def backward_pass(cx, cu, cxx, cxu, cuu, fx, fu, us, T, lamb):
     dV = np.zeros((2,1), dtype=float)
 
     for i in range(T-1,-1,-1):
-        Qx = cx[i] + fx[i].T * Vx[i+1]
-        Qu = cu[i] + fu[i].T * Vx[i+1]
+        Qx = cx[i] + fx[i].T @ Vx[i+1]
+        Qu = cu[i] + fu[i].T @ Vx[i+1]
 
         Qxx = cxx[i] + fx[i].T @ Vxx[i+1] @ fx[i]
         Qux = cxu[i].T + fu[i].T @ Vxx[i+1] @ fx[i]
@@ -296,9 +295,10 @@ def planner(model, params):
     xd = np.zeros((6,1),dtype=float)
     xd[0,0] = 1
     xd[1,0] = 1
+    xd[2,0] = np.pi*3/2
     cost_s = 0.0
 
-    T = 50  # horizon
+    T = 500  # horizon
     us = np.zeros((T, 2, 1), dtype=float)
     for i in range(T):
         us[i,0,0] = 1.0
@@ -321,13 +321,6 @@ def planner(model, params):
     Alpha = np.array([1.0000, 0.5012, 0.2512, 0.1259, 0.0631, 0.0316, 0.0158, 0.0079, 0.0040, 0.0020, 0.0010])
     tolFun = 1e-6
 
-    init_forward = True
-    xs , us , cost_s = forward_pass(x0, us, T,  xs, L, init_forward, model, params)
-    print("***** Initial cost : %.2f  "%(cost_s))
-
-    x = xs
-    u = us
-
     maxIter = 30
     dcost = 0.0
 	# z = 0.0
@@ -341,6 +334,14 @@ def planner(model, params):
     lambdaMin = 1e-8
     dlambda = 1.0
     flgChange = True
+
+    init_forward = True
+    xs , us , cost_s = forward_pass(x0, us, T,  xs, L, init_forward, model, params)
+    print("***** Initial cost : %.2f  "%(cost_s))
+
+    x = xs
+    u = us
+
     for iter in range(maxIter):
         if stop:
             break
@@ -384,10 +385,14 @@ def planner(model, params):
                 for i in range(6):
                     for j in range(i,6):
                         pp = pm = mp = mm = xs[t]
-                        pp[i,0] = pm[i,0] += eps
-                        mp[i,0] = mm[i,0] -= eps
-                        pp[j,0] = mp[j,0] += eps
-                        pm[j,0] = mm[j,0] -= eps
+                        pm[i,0] += eps
+                        pp[i,0] = pm[i,0]
+                        mm[i,0] -= eps
+                        mp[i,0] = mm[i,0]
+                        mp[j,0] += eps
+                        pp[j,0] = mp[j,0]
+                        mm[j,0] -= eps
+                        pm[j,0] = mm[j,0]
                         cxx[t,i,j] = cxx[t,j,i] = (cost(pp[:,0],us[t,:,0]) - cost(pm[:,0],us[t,:,0]) - cost(mp[:,0],us[t,:,0]) + cost(mm[:,0],us[t,:,0]))/(4*eps*eps)
 
                 #cxu
@@ -405,17 +410,21 @@ def planner(model, params):
                 for i in range(2):
                     for j in range(i,2):
                         pp = pm = mp = mm = us[t]
-                        pp[i,0] = pm[i,0] += eps
-                        mp[i,0] = mm[i,0] -= eps
-                        pp[j,0] = mp[j,0] += eps
-                        pm[j,0] = mm[j,0] -= eps
+                        pm[i,0] += eps
+                        pp[i,0] = pm[i,0]
+                        mm[i,0] -= eps
+                        mp[i,0] = mm[i,0]
+                        mp[j,0] += eps
+                        pp[j,0] = mp[j,0]
+                        mm[j,0] -= eps
+                        pm[j,0] = mm[j,0]
                         cuu[t,i,j] = cuu[t,j,i] = (cost(xs[t,:,0], pp[:,0]) - cost(xs[t,:,0], mp[:,0]) - cost(xs[t,:,0],pm[:,0]) + cost(xs[t,:,0],mm[:,0]))/(4*eps*eps)
             flgChange = False
 
         # STEP 2: Backward pass, compute optimal control law and cost-to-go  
         backPassDone = False
         while not backPassDone:
-            diverge, Vx, Vxx, l , L, dV  = backward_pass(cx, cu, cxx, cxu, cuu, fx, fu, u, T, lamb)
+            diverge, Vx, Vxx, l , L, dV  = backward_pass(cx, cu, cxx, cxu, cuu, fx, fu, u, T, lamb, params)
             if diverge != 0:
                 dlambda = max(dlambda * lambdaFactor, lambdaFactor)
                 lamb = max(lamb * dlambda, lambdaMin)
@@ -430,6 +439,9 @@ def planner(model, params):
             for i in range(Alpha.shape[0]):
                 alpha = Alpha[i]
                 xnew , unew, new_cost = forward_pass(x0, adjust_u(us,l,alpha), T, x, L, init_forward, model, params)
+                
+                print("***** Iter %d  cost : %.2f  "%(iter ,cost_s))
+                
                 dcost = cost_s - new_cost
                 expected = -alpha * (dV[0,0] + alpha * dV[1,0])
 
@@ -455,9 +467,9 @@ def planner(model, params):
                 templamb = 0
             lamb = lamb * dlambda * templamb           
             # accept changes
-	 		us        = unew
-	 		xs        = xnew
-	 		cost_s    = new_cost
+            us = unew
+            xs = xnew
+            cost_s = new_cost
             flgChange = True
 
             if dcost < tolFun:
@@ -468,6 +480,9 @@ def planner(model, params):
             lamb = max(lamb * dlambda, lambdaMin)
             if lamb > lambdaMax:
                 break
+    print(xs)
+    print("@@@@@@@@@@@@@@@@@@@")
+    print(us)
 
 def control(X, U , params):
     action = np.array([15, 0.3])
@@ -521,7 +536,14 @@ def test_box_QP():
     print(Hfree)
     print(free_v)
 
+def test_planner():
+    stream = open('/home/xingjiansheng/Workplace/project/MotionPlanner/Drift/ratel_psi/src/python/autonomous_simulation/car.yaml','r')
+    params = yaml.load(stream)
+    model = DynamicBicycleModel(params)
+    planner(model, params)
+
 
 if __name__ == "__main__":
-    simulation()
+    # simulation()
     # test_box_QP()
+    test_planner()

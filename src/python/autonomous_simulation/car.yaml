@@ -11,10 +11,10 @@ tw: 1.295
 wheel_dia: 0.66
 wheel_w: 0.229
 
-u0_min: -100
-u0_max: 100
-u1_min: -100
-u1_max: 100
+u0_min: -10
+u0_max: 10
+u1_min: -0.5
+u1_max: 0.5
 
 
 # g: 9.8
