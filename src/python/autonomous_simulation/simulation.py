@@ -544,6 +544,6 @@ def test_planner():
 
 
 if __name__ == "__main__":
-    # simulation()
+    simulation()
     # test_box_QP()
-    test_planner()
+    # test_planner()
