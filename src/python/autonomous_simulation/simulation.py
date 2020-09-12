@@ -5,6 +5,7 @@ from scipy.integrate import solve_ivp
 
 from car_dynamics import DynamicBicycleModel
 from renderer import _Renderer
+import matplotlib.pyplot as plt
 
 def wraptopi(val):
     """
@@ -535,6 +536,89 @@ def test_box_QP():
     print(x)
     print(Hfree)
     print(free_v)
+
+def plot_car(x, y, yaw, steer=0.0, cabcolor="-r", truckcolor="-k"):
+
+    LENGTH = 0.4         # [m]
+    WIDTH = 0.2          # [m]
+    BACK_TO_WHEEL = 0.08  # [m]
+    WHEEL_LEN = 0.08     # [m]
+    WHEEL_WIDTH = 0.03   # [m] 
+    TRACK_WIDTH = 0.2   # [m] 轮距
+    WHEEL_BASE =  0.25    # [m] 轴距
+
+    # yaw = 0.3
+    # steer = 0.5
+    # x = 1.0
+    # y= 0.0
+    # truck_color="-k"
+
+    outline = np.array(
+        [[-BACK_TO_WHEEL, (LENGTH - BACK_TO_WHEEL), (LENGTH - BACK_TO_WHEEL), -BACK_TO_WHEEL, -BACK_TO_WHEEL],
+            [WIDTH / 2,       WIDTH / 2,               - WIDTH / 2,              -WIDTH / 2,      WIDTH / 2]])
+
+    wheel = np.array([[ -WHEEL_LEN/2,  WHEEL_LEN/2,   WHEEL_LEN/2,    -WHEEL_LEN/2,   -WHEEL_LEN/2],
+                    [ WHEEL_WIDTH/2, WHEEL_WIDTH/2, -WHEEL_WIDTH/2, -WHEEL_WIDTH/2, WHEEL_WIDTH/2]])
+
+    Rot1 = np.array([[np.cos(yaw), -np.sin(yaw)],
+                        [np.sin(yaw), np.cos(yaw)]])
+    Rot2 = np.array([[np.cos(steer), -np.sin(steer)],
+                        [np.sin(steer), np.cos(steer)]])
+
+    fr_wheel = np.copy(wheel)
+    # fr_wheel = (fr_wheel.T.dot(Rot1)).T
+    # fr_wheel = (fr_wheel.T.dot(Rot2)).T
+    fr_wheel = np.dot(Rot2, fr_wheel)
+    fr_wheel[0,:] += WHEEL_BASE
+    fr_wheel[1,:] += -TRACK_WIDTH/2
+    fr_wheel = np.dot(Rot1, fr_wheel)
+
+
+    fl_wheel = np.copy(wheel)
+    # fl_wheel = (fl_wheel.T.dot(Rot1)).T
+    # fl_wheel = (fl_wheel.T.dot(Rot2)).T
+    fl_wheel = np.dot(Rot2, fl_wheel)
+    fl_wheel[0,:] += WHEEL_BASE
+    fl_wheel[1,:] += TRACK_WIDTH/2
+    fl_wheel = np.dot(Rot1, fl_wheel)
+
+    rr_wheel = np.copy(wheel)
+    # rr_wheel = (rr_wheel.T.dot(Rot1)).T
+    rr_wheel[1,:] += -TRACK_WIDTH/2
+    rr_wheel = np.dot(Rot1, rr_wheel)
+
+    rl_wheel = np.copy(wheel)
+    # rl_wheel = (rl_wheel.T.dot(Rot1)).T
+    rl_wheel[1,:] += TRACK_WIDTH/2
+    rl_wheel = np.dot(Rot1, rl_wheel)
+
+    # outline = (outline.T.dot(Rot1)).T
+    outline = np.dot(Rot1,outline)
+
+    outline[0, :] += x
+    outline[1, :] += y
+    fr_wheel[0, :] += x
+    fr_wheel[1, :] += y
+    rr_wheel[0, :] += x
+    rr_wheel[1, :] += y
+    fl_wheel[0, :] += x
+    fl_wheel[1, :] += y
+    rl_wheel[0, :] += x
+    rl_wheel[1, :] += y
+
+    plt.plot(np.array(outline[0, :]).flatten(),
+                np.array(outline[1, :]).flatten(), truck_color)
+    plt.plot(np.array(fr_wheel[0, :]).flatten(),
+                np.array(fr_wheel[1, :]).flatten(), truck_color)
+    plt.plot(np.array(rr_wheel[0, :]).flatten(),
+                np.array(rr_wheel[1, :]).flatten(), truck_color)
+    plt.plot(np.array(fl_wheel[0, :]).flatten(),
+                np.array(fl_wheel[1, :]).flatten(), truck_color)
+    plt.plot(np.array(rl_wheel[0, :]).flatten(),
+                np.array(rl_wheel[1, :]).flatten(), truck_color)
+    plt.plot(x, y, "*")
+
+    plt.show()
 
 def test_planner():
     stream = open('/home/xingjiansheng/Workplace/project/MotionPlanner/Drift/ratel_psi/src/python/autonomous_simulation/car.yaml','r')
