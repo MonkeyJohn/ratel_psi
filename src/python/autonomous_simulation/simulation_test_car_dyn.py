@@ -4,7 +4,6 @@ import math
 from scipy.integrate import solve_ivp
 
 from car_dynamics import DynamicBicycleModel
-from renderer import _Renderer
 from iLQR import iLQR
 
 def clamp_to_limits(u_curr, params):
@@ -167,7 +166,7 @@ def test_planner():
     print(u)
 
 def test_model():
-    stream = open('/home/xingjiansheng/Workplace/project/MotionPlanner/Drift/ratel_psi/src/python/autonomous_simulation/car.yaml','r')
+    stream = open('/home/xingjiansheng/Documents/src/workplace_xjs/2020_final/ratel_psi/src/python/autonomous_simulation/car.yaml','r')
     params = yaml.load(stream)
     model = DynamicBicycleModel(params)    
 
@@ -184,5 +183,5 @@ def test_model():
 
 
 if __name__ == "__main__":
-    # test_model()
-    test_planner()
+    test_model()
+    # test_planner()
